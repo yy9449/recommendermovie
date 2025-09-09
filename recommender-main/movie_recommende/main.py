@@ -26,26 +26,38 @@ st.markdown("---")
 # Data Loading with Error Handling
 # =========================
 @st.cache_data
-def load_and_prepare_data():
-    """Load main CSVs (movies and imdb) and prepare the merged dataset."""
+def load_and_prepare_data(movies_file=None, imdb_file=None):
+    """Load main CSVs and prepare the merged dataset. Prioritizes uploaded files."""
     try:
         movies_df = None
         imdb_df = None
+
+        # Priority 1: Load from uploaded files
+        if movies_file is not None:
+            movies_df = pd.read_csv(movies_file)
+            st.success("✅ Loaded movies.csv from your upload.")
+        # Priority 2: Fallback to local file search
+        else:
+            for path in ["movies.csv", "./movies.csv", "data/movies.csv", "../movies.csv"]:
+                if os.path.exists(path):
+                    movies_df = pd.read_csv(path)
+                    st.success(f"✅ Found local movies.csv at: {path}")
+                    break
         
-        for path in ["movies.csv", "./movies.csv", "data/movies.csv", "../movies.csv"]:
-            if os.path.exists(path):
-                movies_df = pd.read_csv(path)
-                st.success(f"✅ Found movies.csv at: {path}")
-                break
-        
-        for path in ["imdb_top_1000.csv", "./imdb_top_1000.csv", "data/imdb_top_1000.csv", "../imdb_top_1000.csv"]:
-            if os.path.exists(path):
-                imdb_df = pd.read_csv(path)
-                st.success(f"✅ Found imdb_top_1000.csv at: {path}")
-                break
+        # Priority 1: Load from uploaded files
+        if imdb_file is not None:
+            imdb_df = pd.read_csv(imdb_file)
+            st.success("✅ Loaded imdb_top_1000.csv from your upload.")
+        # Priority 2: Fallback to local file search
+        else:
+            for path in ["imdb_top_1000.csv", "./imdb_top_1000.csv", "data/imdb_top_1000.csv", "../imdb_top_1000.csv"]:
+                if os.path.exists(path):
+                    imdb_df = pd.read_csv(path)
+                    st.success(f"✅ Found local imdb_top_1000.csv at: {path}")
+                    break
         
         if movies_df is None or imdb_df is None:
-            return None, "CSV files not found"
+            return None, "Please upload 'movies.csv' and 'imdb_top_1000.csv' to begin."
         
         if 'Movie_ID' not in movies_df.columns:
             movies_df['Movie_ID'] = range(len(movies_df))
@@ -60,26 +72,35 @@ def load_and_prepare_data():
     except Exception as e:
         return None, str(e)
 
-# Run the main data loading
-merged_df, error_msg = load_and_prepare_data()
-
-if error_msg:
-    st.error(f"🚨 Critical Error: {error_msg}")
-    st.stop()
-
 # =========================
 # Sidebar Configuration
 # =========================
 st.sidebar.header("⚙️ Configuration")
 
-uploaded_file = st.sidebar.file_uploader("📤 Upload user_movie_rating.csv", type=["csv"])
-if uploaded_file is not None:
+# --- MODIFIED: Added uploaders for all necessary files ---
+st.sidebar.subheader("Upload Data Files")
+uploaded_movies_file = st.sidebar.file_uploader("1. Upload movies.csv", type=["csv"])
+uploaded_imdb_file = st.sidebar.file_uploader("2. Upload imdb_top_1000.csv", type=["csv"])
+uploaded_user_ratings_file = st.sidebar.file_uploader("3. (Optional) Upload user_movie_rating.csv", type=["csv"])
+
+# Process the optional user ratings file
+if uploaded_user_ratings_file is not None:
     try:
-        st.session_state['user_ratings_df'] = pd.read_csv(uploaded_file)
+        st.session_state['user_ratings_df'] = pd.read_csv(uploaded_user_ratings_file)
         st.sidebar.success("User ratings CSV loaded!")
     except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
+        st.sidebar.error(f"Error reading user ratings file: {e}")
 
+# --- MODIFIED: Pass uploaded files to the loading function ---
+merged_df, error_msg = load_and_prepare_data(uploaded_movies_file, uploaded_imdb_file)
+
+if error_msg:
+    st.error(f"🚨 {error_msg}")
+    st.stop() # Stop the app if core data is missing
+
+# Continue with the rest of the sidebar only if data is loaded
+st.sidebar.markdown("---")
+st.sidebar.subheader("Recommendation Settings")
 recommendation_mode = st.sidebar.selectbox(
     "Select Recommendation Mode",
     ["Hybrid (Content + Collaborative)", "Content-Based", "Collaborative Filtering"]
@@ -104,12 +125,13 @@ with col1:
     st.write(f"**Average Rating:** {merged_df[rating_col].mean():.1f}⭐")
     
     user_ratings_df = load_user_ratings()
-    if user_ratings_df is not None and 'User_ID' in user_ratings_df.columns:
-        st.write(f"**User Ratings Available:** ✅")
-        st.write(f"**Total User Ratings:** {len(user_ratings_df)}")
-        st.write(f"**Unique Users:** {user_ratings_df['User_ID'].nunique()}")
+    if 'User_ID' in user_ratings_df.columns and not user_ratings_df['User_ID'].dtype == 'object':
+         st.write(f"**User Ratings Available:** ✅")
+         st.write(f"**Total User Ratings:** {len(user_ratings_df)}")
+         st.write(f"**Unique Users:** {user_ratings_df['User_ID'].nunique()}")
     else:
         st.write(f"**User Ratings Available:** ❌ (Using synthetic data)")
+
 
 with col2:
     genre_col = 'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre'
@@ -117,98 +139,57 @@ with col2:
     genre_counts = pd.Series(all_genres).value_counts()
     st.bar_chart(genre_counts.head(10))
 
+st.markdown("---")
+st.header(f"✨ Recommendations for '{selected_movie}'")
+
 def display_movie_posters(results_df, merged_df):
     """Display movie posters in cinema-style layout (5 columns per row)"""
     if results_df is None or results_df.empty:
         return
     
-    # Get poster links and movie info
-    movies_with_posters = []
-    for _, row in results_df.iterrows():
+    st.subheader("Top Recommendations")
+    
+    cols = st.columns(5)
+    
+    # Use .head() to prevent errors if there are fewer than 10 recommendations
+    for idx, row in results_df.head(10).iterrows():
         movie_title = row['Series_Title']
-        full_movie_info = merged_df[merged_df['Series_Title'] == movie_title].iloc[0]
-        
-        poster_url = full_movie_info.get('Poster_Link', '')
-        rating_col = 'IMDB_Rating' if 'IMDB_Rating' in merged_df.columns else 'Rating'
-        genre_col = 'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre'
-        year_col = 'Released_Year' if 'Released_Year' in merged_df.columns else 'Year'
-        
-        movies_with_posters.append({
-            'title': movie_title,
-            'poster': poster_url if pd.notna(poster_url) and poster_url.strip() else None,
-            'rating': full_movie_info.get(rating_col, 'N/A'),
-            'genre': full_movie_info.get(genre_col, 'N/A'),
-            'year': full_movie_info.get(year_col, 'N/A')
-        })
-    
-    # Display in rows of 5 columns
-    movies_per_row = 5
-    
-    for i in range(0, len(movies_with_posters), movies_per_row):
-        cols = st.columns(movies_per_row)
-        row_movies = movies_with_posters[i:i + movies_per_row]
-        
-        for j, movie in enumerate(row_movies):
-            with cols[j]:
-                # Movie poster with consistent sizing
-                if movie['poster']:
-                    try:
-                        st.image(
-                            movie['poster'], 
-                            width=200  # Fixed width for consistency
-                        )
-                    except:
-                        # Fallback if image fails to load
-                        st.container()
-                        st.markdown(
-                            f"""
-                            <div style='
-                                width: 200px; 
-                                height: 300px; 
-                                background-color: #f0f0f0; 
-                                display: flex; 
-                                align-items: center; 
-                                justify-content: center;
-                                border: 1px solid #ddd;
-                                border-radius: 8px;
-                            '>
-                                <p style='text-align: center; color: #666;'>🎬<br>No Image<br>Available</p>
-                            </div>
-                            """, 
-                            unsafe_allow_html=True
-                        )
+        try:
+            full_movie_info = merged_df[merged_df['Series_Title'] == movie_title].iloc[0]
+            poster_url = full_movie_info.get('Poster_Link', '')
+            rating = full_movie_info.get('IMDB_Rating', 'N/A')
+            
+            with cols[idx % 5]:
+                if poster_url and isinstance(poster_url, str):
+                    st.image(poster_url, caption=f"{movie_title} ({rating}⭐)", use_column_width=True)
                 else:
-                    # No poster available - show placeholder
-                    st.markdown(
-                        f"""
-                        <div style='
-                            width: 200px; 
-                            height: 300px; 
-                            background-color: #f0f0f0; 
-                            display: flex; 
-                            align-items: center; 
-                            justify-content: center;
-                            border: 1px solid #ddd;
-                            border-radius: 8px;
-                            margin-bottom: 10px;
-                        '>
-                            <p style='text-align: center; color: #666;'>🎬<br>No Image<br>Available</p>
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
-                
-                # Movie information below poster
-                st.markdown(f"**{movie['title'][:25]}{'...' if len(movie['title']) > 25 else ''}**")
-                st.markdown(f"⭐ {movie['rating']}/10")
-                st.markdown(f"📅 {movie['year']}")
-                
-                # Genre with text wrapping
-                genre_text = str(movie['genre'])[:30] + "..." if len(str(movie['genre'])) > 30 else str(movie['genre'])
-                st.markdown(f"🎭 {genre_text}")
-                
-                # Add some spacing between movies
-                st.markdown("---")
+                    st.caption(f"{movie_title}\n({rating}⭐)\n(No Poster)")
+        except IndexError:
+            st.error(f"Could not find info for movie: {movie_title}")
+
+
+if st.button("Get Recommendations"):
+    with st.spinner('Finding recommendations...'):
+        recommendations = None
+        if recommendation_mode == "Content-Based":
+            recommendations = content_based_filtering_enhanced(merged_df, target_title=selected_movie, top_n=top_n)
+        elif recommendation_mode == "Collaborative Filtering":
+            recommendations = collaborative_filtering_enhanced(merged_df, target_movie=selected_movie, top_n=top_n)
+        else: # Hybrid
+            recommendations = smart_hybrid_recommendation(merged_df, target_movie=selected_movie, top_n=top_n)
+        
+        if recommendations is not None and not recommendations.empty:
+            st.success(f"Found your recommendations!")
+            
+            display_movie_posters(recommendations, merged_df)
+            
+            st.markdown("---")
+            st.subheader("Recommendations Details")
+            st.dataframe(recommendations, use_container_width=True)
+        else:
+            st.warning("Could not generate recommendations. Try a different movie or mode.")
+
+
 
 # =========================
 # Main Application
