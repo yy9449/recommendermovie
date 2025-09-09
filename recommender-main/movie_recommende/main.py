@@ -609,6 +609,3 @@ def main():
                     elif genre_input and not movie_title:
                         st.write("- Try selecting a movie you like")
                         st.write("- Try a more common genre")
-
-if __name__ == "__main__":
-    main()
