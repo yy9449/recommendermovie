@@ -2,8 +2,17 @@ import pandas as pd
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 import streamlit as st
-from content_based import find_similar_titles
+from difflib import get_close_matches
 import os
+
+def find_similar_titles(target_title, all_titles, n_matches=3, cutoff=0.6):
+    """Find similar movie titles using fuzzy string matching"""
+    if not target_title or not all_titles:
+        return []
+    
+    # Use difflib for fuzzy matching
+    matches = get_close_matches(target_title, all_titles, n=n_matches, cutoff=cutoff)
+    return matches
 
 @st.cache_data
 def load_user_ratings():
@@ -14,48 +23,12 @@ def load_user_ratings():
             user_ratings_df = st.session_state['user_ratings_df']
             st.success("✅ Using uploaded user_movie_rating.csv from session")
             
-            # Print column names for debugging
-            st.info(f"📋 Columns found in uploaded file: {list(user_ratings_df.columns)}")
-            
-            # Validate required columns - check for exact matches and common variations
+            # Validate required columns
             required_cols = ['User_ID', 'Movie_ID', 'Rating']
-            actual_cols = user_ratings_df.columns.tolist()
-            
-            # Create a mapping for column variations
-            column_mapping = {}
-            for req_col in required_cols:
-                found = False
-                for actual_col in actual_cols:
-                    # Check for exact match (case-insensitive)
-                    if actual_col.strip().lower() == req_col.lower():
-                        column_mapping[req_col] = actual_col
-                        found = True
-                        break
-                    # Check for common variations
-                    elif req_col.lower() in actual_col.strip().lower():
-                        column_mapping[req_col] = actual_col
-                        found = True
-                        break
-                
-                if not found:
-                    st.error(f"❌ Required column '{req_col}' not found in uploaded file")
-                    st.error(f"Available columns: {actual_cols}")
-                    return None
-            
-            # Rename columns to standard names if needed
-            if column_mapping:
-                # Only rename if there are differences
-                rename_dict = {v: k for k, v in column_mapping.items() if v != k}
-                if rename_dict:
-                    user_ratings_df = user_ratings_df.rename(columns=rename_dict)
-                    st.info(f"🔄 Renamed columns: {rename_dict}")
-            
-            # Final validation
             if all(col in user_ratings_df.columns for col in required_cols):
-                st.success(f"✅ User ratings validation successful: {len(user_ratings_df)} ratings from {user_ratings_df['User_ID'].nunique()} users")
                 return user_ratings_df
             else:
-                st.error(f"❌ Column validation failed after processing")
+                st.warning(f"⚠️ Uploaded user_movie_rating.csv missing required columns: {required_cols}")
                 return None
         
         # If not in session state, try to find it in local filesystem
@@ -73,7 +46,6 @@ def load_user_ratings():
                 return user_ratings_df
             else:
                 st.warning(f"⚠️ user_movie_rating.csv missing required columns: {required_cols}")
-                st.info(f"Available columns: {list(user_ratings_df.columns)}")
                 return None
         else:
             st.info("📋 user_movie_rating.csv not found in local directory, using synthetic data")
@@ -99,29 +71,17 @@ def create_user_item_matrix_from_real_data(merged_df, user_ratings_df):
         if 'Movie_ID' in merged_df.columns:
             # Direct Movie_ID mapping
             movie_id_to_index = dict(zip(merged_df['Movie_ID'], merged_df.index))
-            st.info(f"🔗 Using Movie_ID mapping: {len(movie_id_to_index)} movies mapped")
         else:
             # Use index as Movie_ID (common approach)
             movie_id_to_index = dict(zip(range(len(merged_df)), merged_df.index))
-            st.info(f"🔗 Using index-based mapping: {len(movie_id_to_index)} movies mapped")
         
         # Filter user ratings to only include movies in our dataset
         valid_movie_ids = set(movie_id_to_index.keys())
         filtered_ratings = user_ratings_df[user_ratings_df['Movie_ID'].isin(valid_movie_ids)].copy()
         
-        st.info(f"📋 Movie ID range in user ratings: {user_ratings_df['Movie_ID'].min()} - {user_ratings_df['Movie_ID'].max()}")
-        st.info(f"📋 Movie ID range in dataset: {min(valid_movie_ids)} - {max(valid_movie_ids)}")
-        
         if filtered_ratings.empty:
             st.warning("⚠️ No matching movies found between user ratings and movie dataset")
             st.info("💡 Make sure Movie_ID in user_movie_rating.csv corresponds to movie indices in your dataset")
-            
-            # Show sample data for debugging
-            st.info("📋 Sample user ratings Movie_IDs:")
-            st.write(user_ratings_df['Movie_ID'].head(10).tolist())
-            st.info("📋 Sample dataset Movie_IDs:")
-            st.write(list(valid_movie_ids)[:10])
-            
             return create_user_item_matrix_synthetic(merged_df)
         
         st.success(f"✅ Successfully matched {len(filtered_ratings)} ratings with movies in dataset")
@@ -162,7 +122,6 @@ def create_user_item_matrix_from_real_data(merged_df, user_ratings_df):
         
     except Exception as e:
         st.error(f"Error processing user ratings: {str(e)}")
-        st.error(f"Error details: {type(e).__name__}")
         return create_user_item_matrix_synthetic(merged_df)
 
 @st.cache_data
@@ -196,101 +155,3 @@ def create_user_item_matrix_synthetic(merged_df):
                     rating = max(1, min(5, base_rating + np.random.normal(0, 0.5)))
                     if np.random.random() < 0.3:
                         rating = 0
-            user_ratings.append(rating)
-        user_movie_ratings[user_type] = user_ratings
-    
-    rating_matrix = np.array(list(user_movie_ratings.values()))
-    user_names = list(user_movie_ratings.keys())
-    
-    st.info("📊 Using synthetic user data for collaborative filtering")
-    
-    return rating_matrix, user_names
-
-@st.cache_data
-def collaborative_filtering_knn(merged_df, target_movie=None, user_ratings_df=None, top_n=5, n_neighbors=10):
-    """KNN-based collaborative filtering using real or synthetic user data"""
-    if not target_movie:
-        return None
-    
-    similar_titles = find_similar_titles(target_movie, merged_df['Series_Title'].tolist())
-    if not similar_titles:
-        return None
-    
-    target_title = similar_titles[0]
-    target_idx = merged_df[merged_df['Series_Title'] == target_title].index[0]
-    
-    # Use real user data if available, otherwise fall back to synthetic
-    rating_matrix, user_names = create_user_item_matrix_from_real_data(merged_df, user_ratings_df)
-    
-    # Ensure we have enough neighbors
-    actual_neighbors = min(n_neighbors, len(rating_matrix) - 1)
-    if actual_neighbors < 1:
-        st.warning("⚠️ Not enough user data for collaborative filtering")
-        return None
-    
-    # Use KNN with cosine distance for finding similar users
-    knn_model = NearestNeighbors(n_neighbors=actual_neighbors, metric='cosine', algorithm='brute')
-    knn_model.fit(rating_matrix)
-    
-    target_movie_idx = merged_df.index.get_loc(target_idx)
-    target_ratings = rating_matrix[:, target_movie_idx]
-    
-    # Find users who rated this movie (rating > 0)
-    active_users = np.where(target_ratings > 0)[0]
-    
-    if len(active_users) == 0:
-        st.warning(f"⚠️ No users found who rated '{target_title}'")
-        return None
-    
-    st.info(f"🎯 Found {len(active_users)} users who rated '{target_title}'")
-    
-    # Get recommendations from similar users
-    movie_scores = {}
-    rating_col = 'IMDB_Rating' if 'IMDB_Rating' in merged_df.columns else 'Rating'
-    
-    for user_idx in active_users:
-        # Find similar users using KNN
-        distances, neighbor_indices = knn_model.kneighbors([rating_matrix[user_idx]])
-        
-        user_weight = target_ratings[user_idx] / 5.0  # Normalize user rating
-        
-        for i, neighbor_idx in enumerate(neighbor_indices[0]):
-            if neighbor_idx != user_idx:  # Skip self
-                similarity = max(0.1, 1 - distances[0][i])  # Convert distance to similarity
-                neighbor_ratings = rating_matrix[neighbor_idx]
-                
-                # Get recommendations from this similar user
-                for movie_idx, rating in enumerate(neighbor_ratings):
-                    if rating > 3.5 and movie_idx != target_movie_idx:  # Higher threshold for better quality
-                        movie_title = merged_df.iloc[movie_idx]['Series_Title']
-                        if movie_title not in movie_scores:
-                            movie_scores[movie_title] = 0
-                        
-                        # Calculate score: user_rating * similarity * user_weight * imdb_factor
-                        imdb_rating = merged_df.iloc[movie_idx][rating_col]
-                        imdb_rating = imdb_rating if pd.notna(imdb_rating) else 7.0
-                        imdb_factor = (imdb_rating / 10.0) * 0.5 + 0.5  # Scale IMDB rating influence
-                        
-                        score = rating * similarity * user_weight * imdb_factor
-                        movie_scores[movie_title] += score
-    
-    if not movie_scores:
-        st.warning("⚠️ No suitable recommendations found from collaborative filtering")
-        return None
-    
-    # Sort by combined score (high to low)
-    recommendations = sorted(movie_scores.items(), key=lambda x: x[1], reverse=True)[:top_n * 2]
-    
-    # Get result dataframe and sort by IMDB rating
-    rec_titles = [rec[0] for rec in recommendations[:top_n * 2]]
-    result_df = merged_df[merged_df['Series_Title'].isin(rec_titles)]
-    result_df = result_df.sort_values(by=rating_col, ascending=False)
-    
-    genre_col = 'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre'
-    return result_df[['Series_Title', genre_col, rating_col]].head(top_n)
-
-# Main function for the interface
-def collaborative_filtering_enhanced(merged_df, target_movie, top_n=5):
-    """Main collaborative filtering function using KNN - NO CACHE to get fresh user data"""
-    user_ratings_df = load_user_ratings()
-    return collaborative_filtering_knn(merged_df, target_movie, user_ratings_df, top_n, n_neighbors=10)
