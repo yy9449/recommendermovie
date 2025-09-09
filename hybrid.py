@@ -15,8 +15,8 @@ def simple_hybrid_recommendation(merged_df, target_movie=None, genre=None, top_n
     """
     
     # Algorithm weights
-    alpha = 0.3  # Content-based weight
-    beta = 0.5   # Collaborative weight
+    alpha = 0.35  # Content-based weight
+    beta = 0.45   # Collaborative weight
     gamma = 0.1  # Popularity weight
     delta = 0.1  # Recency weight
     
