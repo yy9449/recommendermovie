@@ -4,7 +4,7 @@ import numpy as np
 import warnings
 import os
 from content_based import content_based_filtering_enhanced
-from collaborative import collaborative_filtering_enhanced, load_user_ratings, diagnose_data_linking
+from collaborative import collaborative_filtering_enhanced, load_user_ratings
 from hybrid import smart_hybrid_recommendation
 
 warnings.filterwarnings('ignore')
@@ -27,20 +27,17 @@ st.markdown("---")
 # =========================
 @st.cache_data
 def load_and_prepare_data():
-    """Load CSVs and prepare data for recommendation algorithms"""
+    """Load main CSVs (movies and imdb) and prepare the merged dataset."""
     try:
-        # Try different possible file paths
         movies_df = None
         imdb_df = None
         
-        # Check for movies.csv
         for path in ["movies.csv", "./movies.csv", "data/movies.csv", "../movies.csv"]:
             if os.path.exists(path):
                 movies_df = pd.read_csv(path)
                 st.success(f"✅ Found movies.csv at: {path}")
                 break
         
-        # Check for imdb_top_1000.csv
         for path in ["imdb_top_1000.csv", "./imdb_top_1000.csv", "data/imdb_top_1000.csv", "../imdb_top_1000.csv"]:
             if os.path.exists(path):
                 imdb_df = pd.read_csv(path)
@@ -50,82 +47,75 @@ def load_and_prepare_data():
         if movies_df is None or imdb_df is None:
             return None, "CSV files not found"
         
-        # Check if movies.csv has Movie_ID
         if 'Movie_ID' not in movies_df.columns:
-            st.warning("⚠️ Movie_ID column not found in movies.csv. Adding sequential Movie_IDs.")
             movies_df['Movie_ID'] = range(len(movies_df))
         
-        # Merge on Series_Title
         merged_df = pd.merge(movies_df, imdb_df, on="Series_Title", how="inner")
         merged_df = merged_df.drop_duplicates(subset="Series_Title")
         
-        # Ensure Movie_ID is preserved in merged dataset
-        if 'Movie_ID' not in merged_df.columns and 'Movie_ID' in movies_df.columns:
-            # Re-merge to preserve Movie_ID
-            merged_df = pd.merge(movies_df[['Movie_ID', 'Series_Title']], merged_df, on="Series_Title", how="inner")
-        
-        # Load user ratings data
-        user_ratings_df = load_user_ratings()
-        if user_ratings_df is not None:
-            st.info(f"📊 Dataset Info: Movies: {len(movies_df)}, IMDB: {len(imdb_df)}, Merged: {len(merged_df)}, User Ratings: {len(user_ratings_df)}")
-        else:
-            st.info(f"📊 Dataset Info: Movies: {len(movies_df)}, IMDB: {len(imdb_df)}, Merged: {len(merged_df)}")
+        st.info(f"📊 Dataset Info: Merged {len(merged_df)} movies successfully.")
         
         return merged_df, None
         
     except Exception as e:
         return None, str(e)
 
-def load_data_with_uploader():
-    """Alternative data loading with file uploader"""
-    st.warning("⚠️ CSV files not found in the project directory.")
-    st.info("👆 Please upload your CSV files using the file uploaders below:")
+# Run the main data loading
+merged_df, error_msg = load_and_prepare_data()
+
+if error_msg:
+    st.error(f"🚨 Critical Error: {error_msg}")
+    st.stop()
+
+# =========================
+# Sidebar Configuration
+# =========================
+st.sidebar.header("⚙️ Configuration")
+
+uploaded_file = st.sidebar.file_uploader("📤 Upload user_movie_rating.csv", type=["csv"])
+if uploaded_file is not None:
+    try:
+        st.session_state['user_ratings_df'] = pd.read_csv(uploaded_file)
+        st.sidebar.success("User ratings CSV loaded!")
+    except Exception as e:
+        st.sidebar.error(f"Error reading file: {e}")
+
+recommendation_mode = st.sidebar.selectbox(
+    "Select Recommendation Mode",
+    ["Hybrid (Content + Collaborative)", "Content-Based", "Collaborative Filtering"]
+)
+
+movie_list = merged_df['Series_Title'].unique().tolist()
+selected_movie = st.sidebar.selectbox(
+    "🎬 Select a Movie You Like",
+    options=movie_list
+)
+top_n = st.sidebar.slider("Number of Recommendations", 5, 20, 10)
+
+# =========================
+# Main Panel Display
+# =========================
+st.header("📊 Dataset Overview")
+col1, col2 = st.columns(2)
+
+with col1:
+    st.write(f"**Total Movies:** {len(merged_df)}")
+    rating_col = 'IMDB_Rating' if 'IMDB_Rating' in merged_df.columns else 'Rating'
+    st.write(f"**Average Rating:** {merged_df[rating_col].mean():.1f}⭐")
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        movies_file = st.file_uploader("Upload movies.csv", type=['csv'], key="movies")
-    
-    with col2:
-        imdb_file = st.file_uploader("Upload imdb_top_1000.csv", type=['csv'], key="imdb")
-    
-    with col3:
-        ratings_file = st.file_uploader("Upload user_movie_rating.csv (Optional)", type=['csv'], key="ratings")
-    
-    if movies_file is not None and imdb_file is not None:
-        try:
-            movies_df = pd.read_csv(movies_file)
-            imdb_df = pd.read_csv(imdb_file)
-            
-            # Check if movies.csv has Movie_ID
-            if 'Movie_ID' not in movies_df.columns:
-                st.warning("⚠️ Movie_ID column not found in movies.csv. Adding sequential Movie_IDs.")
-                movies_df['Movie_ID'] = range(len(movies_df))
-            
-            # Handle user ratings if provided
-            user_ratings_df = None
-            if ratings_file is not None:
-                user_ratings_df = pd.read_csv(ratings_file)
-                # Store in session state for later use
-                st.session_state['user_ratings_df'] = user_ratings_df
-                st.success("✅ User ratings file loaded successfully!")
-            
-            # Merge datasets
-            merged_df = pd.merge(movies_df, imdb_df, on="Series_Title", how="inner")
-            merged_df = merged_df.drop_duplicates(subset="Series_Title")
-            
-            # Ensure Movie_ID is preserved
-            if 'Movie_ID' not in merged_df.columns and 'Movie_ID' in movies_df.columns:
-                merged_df = pd.merge(movies_df[['Movie_ID', 'Series_Title']], merged_df, on="Series_Title", how="inner")
-            
-            st.success(f"✅ Data loaded successfully! Merged dataset: {len(merged_df)} movies")
-            
-            return merged_df, None
-            
-        except Exception as e:
-            return None, f"Error processing uploaded files: {str(e)}"
-    
-    return None, "Please upload both CSV files (movies.csv and imdb_top_1000.csv)"
+    user_ratings_df = load_user_ratings()
+    if user_ratings_df is not None and 'User_ID' in user_ratings_df.columns:
+        st.write(f"**User Ratings Available:** ✅")
+        st.write(f"**Total User Ratings:** {len(user_ratings_df)}")
+        st.write(f"**Unique Users:** {user_ratings_df['User_ID'].nunique()}")
+    else:
+        st.write(f"**User Ratings Available:** ❌ (Using synthetic data)")
+
+with col2:
+    genre_col = 'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre'
+    all_genres = [g.strip() for sublist in merged_df[genre_col].dropna().str.split(',') for g in sublist]
+    genre_counts = pd.Series(all_genres).value_counts()
+    st.bar_chart(genre_counts.head(10))
 
 def display_movie_posters(results_df, merged_df):
     """Display movie posters in cinema-style layout (5 columns per row)"""
