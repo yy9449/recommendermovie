@@ -609,3 +609,17 @@ def main():
                     elif genre_input and not movie_title:
                         st.write("- Try selecting a movie you like")
                         st.write("- Try a more common genre")
+            
+            except Exception as e:
+                st.error(f"❌ Error generating recommendations: {str(e)}")
+                st.exception(e)
+                
+                # Provide debug information
+                st.subheader("🔍 Debug Information:")
+                st.write(f"Selected movie: {movie_title}")
+                st.write(f"Selected genre: {genre_input}")
+                st.write(f"Algorithm: {algorithm}")
+                st.write("Please check if your input files have the correct format and try again.")
+
+if __name__ == "__main__":
+    main()
