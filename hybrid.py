@@ -80,7 +80,7 @@ def simple_hybrid_recommendation(merged_df, target_movie=None, genre=None, top_n
     collab_scores = {}
     if target_movie and user_ratings_df is not None:
         try:
-            collab_results = collaborative_knn(merged_df, target_movie, top_n=top_n * 10, k_neighbors=100)
+            collab_results = collaborative_knn(merged_df, target_movie, top_n=top_n * 5, k_neighbors=50)
             if collab_results is not None and not collab_results.empty:
                 if 'Similarity' in collab_results.columns:
                     for _, row in collab_results.iterrows():
