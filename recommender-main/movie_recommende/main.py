@@ -4,7 +4,7 @@ import numpy as np
 import warnings
 import os
 from content_based import content_based_filtering_enhanced
-from collaborative import collaborative_filtering_enhanced, load_user_ratings, diagnose_data_linking
+from collaborative import collaborative_filtering_enhanced, load_user_ratings
 from hybrid import smart_hybrid_recommendation
 
 warnings.filterwarnings('ignore')
@@ -84,48 +84,131 @@ def load_data_with_uploader():
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        st.subheader("📽️ Movies Data")
         movies_file = st.file_uploader("Upload movies.csv", type=['csv'], key="movies")
+        if movies_file:
+            st.success("✅ movies.csv uploaded!")
     
     with col2:
+        st.subheader("🏆 IMDB Data")
         imdb_file = st.file_uploader("Upload imdb_top_1000.csv", type=['csv'], key="imdb")
+        if imdb_file:
+            st.success("✅ imdb_top_1000.csv uploaded!")
     
     with col3:
-        ratings_file = st.file_uploader("Upload user_movie_rating.csv (Optional)", type=['csv'], key="ratings")
+        st.subheader("👥 User Ratings (Optional)")
+        ratings_file = st.file_uploader("Upload user_movie_rating.csv", type=['csv'], key="ratings")
+        if ratings_file:
+            st.success("✅ user_movie_rating.csv uploaded!")
     
     if movies_file is not None and imdb_file is not None:
         try:
+            # Load the main datasets
             movies_df = pd.read_csv(movies_file)
             imdb_df = pd.read_csv(imdb_file)
             
-            # Check if movies.csv has Movie_ID
+            st.info(f"📋 Movies.csv columns: {list(movies_df.columns)}")
+            st.info(f"📋 IMDB.csv columns: {list(imdb_df.columns)}")
+            
+            # Check if movies.csv has Movie_ID, if not add it
             if 'Movie_ID' not in movies_df.columns:
                 st.warning("⚠️ Movie_ID column not found in movies.csv. Adding sequential Movie_IDs.")
                 movies_df['Movie_ID'] = range(len(movies_df))
+                st.success("✅ Added Movie_ID column to movies data")
             
             # Handle user ratings if provided
-            user_ratings_df = None
             if ratings_file is not None:
-                user_ratings_df = pd.read_csv(ratings_file)
-                # Store in session state for later use
-                st.session_state['user_ratings_df'] = user_ratings_df
-                st.success("✅ User ratings file loaded successfully!")
+                try:
+                    user_ratings_df = pd.read_csv(ratings_file)
+                    st.info(f"📋 User ratings columns: {list(user_ratings_df.columns)}")
+                    
+                    # Validate user ratings columns
+                    required_rating_cols = ['User_ID', 'Movie_ID', 'Rating']
+                    actual_rating_cols = user_ratings_df.columns.tolist()
+                    
+                    # Check for exact matches or variations
+                    missing_cols = []
+                    for req_col in required_rating_cols:
+                        found = any(
+                            actual_col.strip().lower() == req_col.lower() 
+                            for actual_col in actual_rating_cols
+                        )
+                        if not found:
+                            missing_cols.append(req_col)
+                    
+                    if missing_cols:
+                        st.error(f"❌ User ratings file missing required columns: {missing_cols}")
+                        st.error(f"Available columns: {actual_rating_cols}")
+                        st.info("💡 Make sure your user_movie_rating.csv has exactly these columns: User_ID, Movie_ID, Rating")
+                    else:
+                        # Store in session state for later use by collaborative.py
+                        st.session_state['user_ratings_df'] = user_ratings_df
+                        st.success(f"✅ User ratings file loaded successfully! {len(user_ratings_df)} ratings from {user_ratings_df['User_ID'].nunique()} users")
+                        
+                        # Show data preview
+                        with st.expander("📊 User Ratings Preview", expanded=False):
+                            st.dataframe(user_ratings_df.head())
+                            st.info(f"Rating range: {user_ratings_df['Rating'].min()} - {user_ratings_df['Rating'].max()}")
+                            st.info(f"Movie ID range: {user_ratings_df['Movie_ID'].min()} - {user_ratings_df['Movie_ID'].max()}")
+                            
+                except Exception as e:
+                    st.error(f"❌ Error processing user ratings file: {str(e)}")
             
-            # Merge datasets
+            # Merge the main datasets
+            if 'Series_Title' not in movies_df.columns:
+                st.error("❌ 'Series_Title' column not found in movies.csv")
+                return None, "Series_Title column missing in movies.csv"
+            
+            if 'Series_Title' not in imdb_df.columns:
+                st.error("❌ 'Series_Title' column not found in imdb_top_1000.csv")
+                return None, "Series_Title column missing in imdb_top_1000.csv"
+            
             merged_df = pd.merge(movies_df, imdb_df, on="Series_Title", how="inner")
             merged_df = merged_df.drop_duplicates(subset="Series_Title")
             
-            # Ensure Movie_ID is preserved
+            # Ensure Movie_ID is preserved in merged dataset
             if 'Movie_ID' not in merged_df.columns and 'Movie_ID' in movies_df.columns:
-                merged_df = pd.merge(movies_df[['Movie_ID', 'Series_Title']], merged_df, on="Series_Title", how="inner")
+                # Re-merge to preserve Movie_ID
+                temp_movies = movies_df[['Movie_ID', 'Series_Title']].drop_duplicates(subset="Series_Title")
+                merged_df = pd.merge(temp_movies, merged_df, on="Series_Title", how="inner")
+                st.info("🔗 Movie_ID column preserved in merged dataset")
             
             st.success(f"✅ Data loaded successfully! Merged dataset: {len(merged_df)} movies")
+            
+            # Show final dataset info
+            with st.expander("📊 Dataset Preview", expanded=False):
+                st.subheader("Merged Dataset Columns")
+                st.write(list(merged_df.columns))
+                
+                st.subheader("Sample Data")
+                st.dataframe(merged_df[['Movie_ID', 'Series_Title', 'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre', 'IMDB_Rating' if 'IMDB_Rating' in merged_df.columns else 'Rating']].head())
+                
+                if 'Movie_ID' in merged_df.columns:
+                    st.success(f"✅ Movie_ID range in final dataset: {merged_df['Movie_ID'].min()} - {merged_df['Movie_ID'].max()}")
             
             return merged_df, None
             
         except Exception as e:
+            st.error(f"❌ Error processing uploaded files: {str(e)}")
             return None, f"Error processing uploaded files: {str(e)}"
     
-    return None, "Please upload both CSV files (movies.csv and imdb_top_1000.csv)"
+    # Show helpful instructions if files are not uploaded
+    elif movies_file is None or imdb_file is None:
+        st.info("📋 **Required Files:**")
+        st.markdown("""
+        1. **movies.csv** - Must contain 'Series_Title' column
+        2. **imdb_top_1000.csv** - Must contain 'Series_Title', 'Genre', 'IMDB_Rating' columns
+        3. **user_movie_rating.csv** (optional) - Must contain 'User_ID', 'Movie_ID', 'Rating' columns
+        """)
+        
+        st.info("💡 **Column Requirements:**")
+        st.markdown("""
+        - All files must have 'Series_Title' column with matching movie names
+        - User ratings 'Movie_ID' should correspond to the Movie_ID in movies.csv
+        - If movies.csv doesn't have Movie_ID, sequential IDs will be added automatically
+        """)
+    
+    return None, "Please upload the required CSV files"
 
 def display_movie_posters(results_df, merged_df):
     """Display movie posters in cinema-style layout (5 columns per row)"""
