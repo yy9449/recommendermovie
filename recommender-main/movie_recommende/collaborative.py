@@ -57,12 +57,20 @@ def load_user_ratings():
 
 @st.cache_data
 def create_user_item_matrix_from_real_data(merged_df, user_ratings_df):
-    """Create user-item matrix from real user rating data"""
+    """Create user-item matrix from real user rating data - FIXED VERSION"""
     if user_ratings_df is None:
         return create_user_item_matrix_synthetic(merged_df)
     
     try:
         st.info(f"📊 Processing user ratings: {len(user_ratings_df)} ratings from {user_ratings_df['User_ID'].nunique()} users")
+        
+        # CRITICAL FIX: Remove duplicate ratings before creating pivot table
+        # Keep only the latest rating if a user rated the same movie multiple times
+        user_ratings_clean = user_ratings_df.drop_duplicates(subset=['User_ID', 'Movie_ID'], keep='last')
+        
+        duplicate_count = len(user_ratings_df) - len(user_ratings_clean)
+        if duplicate_count > 0:
+            st.info(f"🔄 Removed {duplicate_count} duplicate user-movie ratings")
         
         # Create a mapping between Movie_ID and our merged_df
         movie_id_to_index = {}
@@ -77,7 +85,7 @@ def create_user_item_matrix_from_real_data(merged_df, user_ratings_df):
         
         # Filter user ratings to only include movies in our dataset
         valid_movie_ids = set(movie_id_to_index.keys())
-        filtered_ratings = user_ratings_df[user_ratings_df['Movie_ID'].isin(valid_movie_ids)].copy()
+        filtered_ratings = user_ratings_clean[user_ratings_clean['Movie_ID'].isin(valid_movie_ids)].copy()
         
         if filtered_ratings.empty:
             st.warning("⚠️ No matching movies found between user ratings and movie dataset")
@@ -89,7 +97,7 @@ def create_user_item_matrix_from_real_data(merged_df, user_ratings_df):
         # Map Movie_ID to our dataset indices
         filtered_ratings['dataset_index'] = filtered_ratings['Movie_ID'].map(movie_id_to_index)
         
-        # Create user-item matrix using dataset indices
+        # Create user-item matrix using dataset indices - NOW WITHOUT DUPLICATES
         user_movie_matrix = filtered_ratings.pivot(
             index='User_ID', 
             columns='dataset_index', 
@@ -122,6 +130,7 @@ def create_user_item_matrix_from_real_data(merged_df, user_ratings_df):
         
     except Exception as e:
         st.error(f"Error processing user ratings: {str(e)}")
+        st.exception(e)  # Show full error traceback for debugging
         return create_user_item_matrix_synthetic(merged_df)
 
 @st.cache_data
@@ -155,3 +164,142 @@ def create_user_item_matrix_synthetic(merged_df):
                     rating = max(1, min(5, base_rating + np.random.normal(0, 0.5)))
                     if np.random.random() < 0.3:
                         rating = 0
+            
+            user_ratings.append(rating)
+        user_movie_ratings[user_type] = user_ratings
+    
+    rating_matrix = np.array(list(user_movie_ratings.values()))
+    user_names = list(user_movie_ratings.keys())
+    
+    st.info("📊 Using synthetic user data for collaborative filtering")
+    return rating_matrix, user_names
+
+def collaborative_filtering_enhanced(merged_df, movie_title, top_n=8):
+    """Enhanced Collaborative Filtering with real user data support"""
+    try:
+        # Load real user ratings
+        user_ratings_df = load_user_ratings()
+        
+        # Create user-item matrix (will use real data if available, synthetic as fallback)
+        rating_matrix, user_names = create_user_item_matrix_from_real_data(merged_df, user_ratings_df)
+        
+        # Find the movie index
+        movie_matches = merged_df[merged_df['Series_Title'].str.contains(movie_title, case=False, na=False)]
+        
+        if movie_matches.empty:
+            # Try fuzzy matching
+            all_titles = merged_df['Series_Title'].tolist()
+            similar_titles = find_similar_titles(movie_title, all_titles, n_matches=1, cutoff=0.3)
+            if similar_titles:
+                movie_title = similar_titles[0]
+                movie_matches = merged_df[merged_df['Series_Title'] == movie_title]
+            
+            if movie_matches.empty:
+                st.warning(f"Movie '{movie_title}' not found in dataset")
+                return pd.DataFrame()
+        
+        movie_idx = movie_matches.index[0]
+        actual_movie_title = movie_matches.iloc[0]['Series_Title']
+        
+        # Check if any users have rated this movie
+        users_who_rated = np.where(rating_matrix[:, movie_idx] > 0)[0]
+        
+        if len(users_who_rated) == 0:
+            st.warning(f"No users have rated '{actual_movie_title}'. Using item-based approach.")
+            return item_based_collaborative_filtering(merged_df, movie_idx, rating_matrix, top_n)
+        
+        st.info(f"🎯 Found {len(users_who_rated)} users who rated '{actual_movie_title}'")
+        
+        # Use user-based collaborative filtering
+        return user_based_collaborative_filtering(merged_df, users_who_rated, rating_matrix, movie_idx, top_n)
+        
+    except Exception as e:
+        st.error(f"Error in collaborative filtering: {str(e)}")
+        st.exception(e)
+        return pd.DataFrame()
+
+def user_based_collaborative_filtering(merged_df, users_who_rated, rating_matrix, movie_idx, top_n):
+    """User-based collaborative filtering using KNN"""
+    try:
+        # Get ratings from users who rated the target movie
+        similar_users_ratings = rating_matrix[users_who_rated]
+        
+        # Find movies that these users also rated highly (rating >= 4)
+        recommendations = {}
+        
+        for user_idx in users_who_rated:
+            user_ratings = rating_matrix[user_idx]
+            # Find movies this user rated highly (4 or 5 stars)
+            highly_rated_movies = np.where(user_ratings >= 4)[0]
+            
+            for rec_movie_idx in highly_rated_movies:
+                if rec_movie_idx != movie_idx:  # Don't recommend the same movie
+                    if rec_movie_idx not in recommendations:
+                        recommendations[rec_movie_idx] = []
+                    recommendations[rec_movie_idx].append(user_ratings[rec_movie_idx])
+        
+        # Calculate average ratings for each recommended movie
+        movie_scores = {}
+        for movie_idx_rec, ratings_list in recommendations.items():
+            avg_rating = np.mean(ratings_list)
+            movie_scores[movie_idx_rec] = avg_rating
+        
+        # Sort by average rating and get top N
+        sorted_movies = sorted(movie_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        
+        # Create results DataFrame
+        results = []
+        for movie_idx_rec, avg_rating in sorted_movies:
+            movie_info = merged_df.iloc[movie_idx_rec]
+            results.append({
+                'Series_Title': movie_info['Series_Title'],
+                'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre': 
+                    movie_info.get('Genre_y', movie_info.get('Genre', 'N/A')),
+                'IMDB_Rating' if 'IMDB_Rating' in merged_df.columns else 'Rating':
+                    movie_info.get('IMDB_Rating', movie_info.get('Rating', 0)),
+                'Predicted_Rating': avg_rating
+            })
+        
+        results_df = pd.DataFrame(results)
+        
+        if not results_df.empty:
+            st.success(f"✅ Generated {len(results_df)} recommendations based on {len(users_who_rated)} similar users")
+        
+        return results_df
+        
+    except Exception as e:
+        st.error(f"Error in user-based collaborative filtering: {str(e)}")
+        return pd.DataFrame()
+
+def item_based_collaborative_filtering(merged_df, movie_idx, rating_matrix, top_n):
+    """Item-based collaborative filtering as fallback"""
+    try:
+        # Use KNN to find similar movies based on user ratings
+        knn_model = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=min(top_n + 1, len(rating_matrix[0])))
+        knn_model.fit(rating_matrix.T)  # Transpose for item-based
+        
+        # Find similar movies
+        distances, indices = knn_model.kneighbors(rating_matrix[:, movie_idx].reshape(1, -1), n_neighbors=min(top_n + 1, len(rating_matrix[0])))
+        
+        # Get recommendations (excluding the input movie)
+        similar_movie_indices = indices[0][1:]  # Exclude the first one (itself)
+        
+        results = []
+        for idx in similar_movie_indices[:top_n]:
+            movie_info = merged_df.iloc[idx]
+            results.append({
+                'Series_Title': movie_info['Series_Title'],
+                'Genre_y' if 'Genre_y' in merged_df.columns else 'Genre': 
+                    movie_info.get('Genre_y', movie_info.get('Genre', 'N/A')),
+                'IMDB_Rating' if 'IMDB_Rating' in merged_df.columns else 'Rating':
+                    movie_info.get('IMDB_Rating', movie_info.get('Rating', 0))
+            })
+        
+        results_df = pd.DataFrame(results)
+        st.info(f"📊 Used item-based collaborative filtering")
+        
+        return results_df
+        
+    except Exception as e:
+        st.error(f"Error in item-based collaborative filtering: {str(e)}")
+        return pd.DataFrame()
