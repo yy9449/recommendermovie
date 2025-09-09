@@ -352,185 +352,187 @@ def main():
     # Number of recommendations
     top_n = st.sidebar.slider("📊 Number of Recommendations:", 3, 15, 8)
     
+    # Score breakdown checkbox for Hybrid only
+    show_score_breakdown = False
+    if algorithm == "Hybrid":
+        show_score_breakdown = st.sidebar.checkbox(
+            "Show Hybrid Score Breakdown", 
+            value=False, 
+            help="Display detailed scoring for each component"
+        )
+    
     # Show data source info quietly in sidebar
     if user_ratings_available:
         st.sidebar.success("💾 Real user data available")
     else:
         st.sidebar.info("🤖 Using synthetic profiles")
     
-# Generate button
-if st.sidebar.button("🚀 Generate Recommendations", type="primary"):
-    if not movie_title and not genre_input:
-        st.error("⚠️ Please provide either a movie title or select a genre!")
-        return
-    
-    # Add score breakdown checkbox in sidebar before generation
-    show_score_breakdown = st.sidebar.checkbox(
-        "Show Hybrid Score Breakdown", 
-        value=False, 
-        help="Display detailed scoring for each component (Hybrid only)"
-    )
-    
-    with st.spinner("🎬 Generating personalized recommendations..."):
-        results = None
-        debug_info = None
-        score_breakdown = None
+    # Generate button
+    if st.sidebar.button("🚀 Generate Recommendations", type="primary"):
+        if not movie_title and not genre_input:
+            st.error("❌ Please provide either a movie title or select a genre!")
+            return
         
-        if algorithm == "Content-Based":
-            results = content_based_filtering_enhanced(merged_df, movie_title, genre_input, top_n)
-        elif algorithm == "Collaborative Filtering":
-            if movie_title:
-                results = collaborative_filtering_enhanced(merged_df, movie_title, top_n)
-            else:
-                st.warning("⚠️ Collaborative filtering requires a movie title input.")
-                return
-        else:  # Hybrid
-            results, debug_info, score_breakdown = smart_hybrid_recommendation(
-                merged_df, movie_title, genre_input, top_n, show_debug=show_score_breakdown
-            )
-        
-        # Display results
-        if results is not None and not results.empty:
-            # Display hybrid debug info first
-            if debug_info:
-                with st.expander("🔍 Hybrid Algorithm Performance", expanded=True):
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Content Candidates", debug_info['content_candidates'])
-                    with col2:
-                        st.metric("Collaborative Candidates", debug_info['collab_candidates']) 
-                    with col3:
-                        st.metric("Popularity Candidates", debug_info['popularity_candidates'])
-                    with col4:
-                        st.metric("Recency Candidates", debug_info['recency_candidates'])
-                    
-                    # Component weights display
-                    st.markdown("### 📊 Algorithm Weights")
-                    weight_col1, weight_col2, weight_col3, weight_col4 = st.columns(4)
-                    
-                    with weight_col1:
-                        st.metric("Content-Based", "40%", help="Similarity based on genre, title, rating")
-                    with weight_col2:
-                        st.metric("Collaborative", "40%", help="User rating patterns and preferences")
-                    with weight_col3:
-                        st.metric("Popularity", "10%", help="IMDB rating and vote count")
-                    with weight_col4:
-                        st.metric("Recency", "10%", help="Release year preference")
-                    
-                    # Formula display
-                    st.markdown("""
-                    **Final Score Formula:**
-                    ```
-                    FinalScore = 0.4×Content + 0.4×Collaborative + 0.1×Popularity + 0.1×Recency
-                    ```
-                    """)
+        with st.spinner("🎬 Generating personalized recommendations..."):
+            results = None
+            debug_info = None
+            score_breakdown = None
             
-            # Results display
-            st.subheader("🎬 Recommended Movies")
-            
-            # Cinema-style poster display
-            display_movie_posters(results, merged_df)
-            
-            # Display score breakdown if available and requested
-            if score_breakdown:
-                st.subheader("📊 Detailed Score Breakdown")
-                st.markdown("**Component scores for each recommendation:**")
-                breakdown_df = pd.DataFrame(score_breakdown)
-                
-                # Style the dataframe for better readability
-                st.dataframe(
-                    breakdown_df, 
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config={
-                        "Movie": st.column_config.TextColumn("Movie Title", width="large"),
-                        "Content": st.column_config.TextColumn("Content", width="small"),
-                        "Collaborative": st.column_config.TextColumn("Collaborative", width="small"),
-                        "Popularity": st.column_config.TextColumn("Popularity", width="small"),
-                        "Recency": st.column_config.TextColumn("Recency", width="small"),
-                        "Final Score": st.column_config.TextColumn("Final Score", width="medium")
-                    }
+            if algorithm == "Content-Based":
+                results = content_based_filtering_enhanced(merged_df, movie_title, genre_input, top_n)
+            elif algorithm == "Collaborative Filtering":
+                if movie_title:
+                    results = collaborative_filtering_enhanced(merged_df, movie_title, top_n)
+                else:
+                    st.warning("⚠️ Collaborative filtering requires a movie title input.")
+                    return
+            else:  # Hybrid
+                results, debug_info, score_breakdown = smart_hybrid_recommendation(
+                    merged_df, movie_title, genre_input, top_n, show_debug=show_score_breakdown
                 )
+            
+            # Display results
+            if results is not None and not results.empty:
+                # Display hybrid debug info first
+                if debug_info:
+                    with st.expander("🔍 Hybrid Algorithm Performance", expanded=True):
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Content Candidates", debug_info['content_candidates'])
+                        with col2:
+                            st.metric("Collaborative Candidates", debug_info['collab_candidates']) 
+                        with col3:
+                            st.metric("Popularity Candidates", debug_info['popularity_candidates'])
+                        with col4:
+                            st.metric("Recency Candidates", debug_info['recency_candidates'])
+                        
+                        # Component weights display
+                        st.markdown("### 📊 Algorithm Weights")
+                        weight_col1, weight_col2, weight_col3, weight_col4 = st.columns(4)
+                        
+                        with weight_col1:
+                            st.metric("Content-Based", "40%", help="Similarity based on genre, title, rating")
+                        with weight_col2:
+                            st.metric("Collaborative", "40%", help="User rating patterns and preferences")
+                        with weight_col3:
+                            st.metric("Popularity", "10%", help="IMDB rating and vote count")
+                        with weight_col4:
+                            st.metric("Recency", "10%", help="Release year preference")
+                        
+                        # Formula display
+                        st.markdown("""
+                        **Final Score Formula:**
+                        ```
+                        FinalScore = 0.4×Content + 0.4×Collaborative + 0.1×Popularity + 0.1×Recency
+                        ```
+                        """)
                 
-                st.info("Higher scores indicate stronger matches. All component scores are normalized to 0-1 range.")
+                # Results display
+                st.subheader("🎬 Recommended Movies")
+                
+                # Cinema-style poster display
+                display_movie_posters(results, merged_df)
+                
+                # Display score breakdown if available and requested
+                if score_breakdown:
+                    st.subheader("📊 Detailed Score Breakdown")
+                    st.markdown("**Component scores for each recommendation:**")
+                    breakdown_df = pd.DataFrame(score_breakdown)
+                    
+                    # Style the dataframe for better readability
+                    st.dataframe(
+                        breakdown_df, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Movie": st.column_config.TextColumn("Movie Title", width="large"),
+                            "Content": st.column_config.TextColumn("Content", width="small"),
+                            "Collaborative": st.column_config.TextColumn("Collaborative", width="small"),
+                            "Popularity": st.column_config.TextColumn("Popularity", width="small"),
+                            "Recency": st.column_config.TextColumn("Recency", width="small"),
+                            "Final Score": st.column_config.TextColumn("Final Score", width="medium")
+                        }
+                    )
+                    
+                    st.info("Higher scores indicate stronger matches. All component scores are normalized to 0-1 range.")
 
-            # Collaborative diagnostics (existing section - keep as is)
-            with st.expander("🔧 Collaborative Debug", expanded=False):
-                try:
-                    ratings_df_dbg = load_user_ratings()
-                    ratings_loaded = ratings_df_dbg is not None and not ratings_df_dbg.empty
-                    st.write("Ratings loaded:", ratings_loaded)
+                # Collaborative diagnostics
+                with st.expander("🔧 Collaborative Debug", expanded=False):
+                    try:
+                        ratings_df_dbg = load_user_ratings()
+                        ratings_loaded = ratings_df_dbg is not None and not ratings_df_dbg.empty
+                        st.write("Ratings loaded:", ratings_loaded)
 
-                    if movie_title:
-                        movie_id_dbg = None
-                        if 'Movie_ID' in merged_df.columns:
-                            movie_row_dbg = merged_df[merged_df['Series_Title'] == movie_title]
-                            if not movie_row_dbg.empty:
-                                movie_id_dbg = int(movie_row_dbg.iloc[0]['Movie_ID'])
+                        if movie_title:
+                            movie_id_dbg = None
+                            if 'Movie_ID' in merged_df.columns:
+                                movie_row_dbg = merged_df[merged_df['Series_Title'] == movie_title]
+                                if not movie_row_dbg.empty:
+                                    movie_id_dbg = int(movie_row_dbg.iloc[0]['Movie_ID'])
 
-                        rating_count = int(ratings_df_dbg[ratings_df_dbg['Movie_ID'] == movie_id_dbg].shape[0]) if ratings_loaded and movie_id_dbg is not None else 0
-                        st.write("Selected movie rating count:", rating_count)
+                            rating_count = int(ratings_df_dbg[ratings_df_dbg['Movie_ID'] == movie_id_dbg].shape[0]) if ratings_loaded and movie_id_dbg is not None else 0
+                            st.write("Selected movie rating count:", rating_count)
 
-                        collab_candidates = collaborative_knn(merged_df, movie_title, top_n=top_n * 3, k_neighbors=50)
-                        collab_count = 0 if (collab_candidates is None or getattr(collab_candidates, 'empty', True)) else len(collab_candidates)
-                        st.write("Collaborative candidates:", collab_count)
+                            collab_candidates = collaborative_knn(merged_df, movie_title, top_n=top_n * 3, k_neighbors=50)
+                            collab_count = 0 if (collab_candidates is None or getattr(collab_candidates, 'empty', True)) else len(collab_candidates)
+                            st.write("Collaborative candidates:", collab_count)
 
-                        if collab_count > 0 and results is not None and not results.empty:
+                            if collab_count > 0 and results is not None and not results.empty:
+                                try:
+                                    overlap = set(results['Series_Title']).intersection(set(collab_candidates['Series_Title']))
+                                    st.write("Overlap with results:", len(overlap))
+                                except Exception:
+                                    pass
+
+                        diag = diagnose_data_linking(merged_df)
+                        if isinstance(diag, dict) and 'ratings_coverage_ratio' in diag:
                             try:
-                                overlap = set(results['Series_Title']).intersection(set(collab_candidates['Series_Title']))
-                                st.write("Overlap with results:", len(overlap))
+                                st.write("Ratings coverage ratio:", f"{diag['ratings_coverage_ratio'] * 100:.1f}%")
                             except Exception:
-                                pass
-
-                    diag = diagnose_data_linking(merged_df)
-                    if isinstance(diag, dict) and 'ratings_coverage_ratio' in diag:
-                        try:
-                            st.write("Ratings coverage ratio:", f"{diag['ratings_coverage_ratio'] * 100:.1f}%")
-                        except Exception:
-                            st.write("Ratings coverage ratio:", diag.get('ratings_coverage_ratio'))
-                except Exception as e:
-                    st.write(f"Debug error: {e}")
-            
-            # Optional: Show detailed table (existing section - keep as is)
-            with st.expander("📊 View Detailed Information", expanded=False):
-                # Format the results for better display
-                display_results = results.copy()
-                rating_col = 'IMDB_Rating' if 'IMDB_Rating' in results.columns else 'Rating'
-                genre_col = 'Genre_y' if 'Genre_y' in results.columns else 'Genre'
+                                st.write("Ratings coverage ratio:", diag.get('ratings_coverage_ratio'))
+                    except Exception as e:
+                        st.write(f"Debug error: {e}")
                 
-                display_results = display_results.rename(columns={
-                    'Series_Title': 'Movie Title',
-                    genre_col: 'Genre',
-                    rating_col: 'IMDB Rating'
-                })
-                
-                # Add ranking
-                display_results.insert(0, 'Rank', range(1, len(display_results) + 1))
-                
-                # Add Movie_ID if available
-                if 'Movie_ID' in merged_df.columns:
-                    movie_ids = []
-                    for _, row in results.iterrows():
-                        movie_info = merged_df[merged_df['Series_Title'] == row['Series_Title']]
-                        if not movie_info.empty:
-                            movie_ids.append(movie_info.iloc[0]['Movie_ID'])
-                        else:
-                            movie_ids.append('N/A')
-                    display_results.insert(1, 'Movie ID', movie_ids)
-                
-                st.dataframe(
-                    display_results,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Rank": st.column_config.NumberColumn("Rank", width="small"),
-                        "Movie ID": st.column_config.NumberColumn("Movie ID", width="small"),
-                        "Movie Title": st.column_config.TextColumn("Movie Title", width="large"),
-                        "Genre": st.column_config.TextColumn("Genre", width="medium"),
-                        "IMDB Rating": st.column_config.NumberColumn("IMDB Rating", format="%.1f⭐")
-                    }
-                )
+                # Optional: Show detailed table
+                with st.expander("📊 View Detailed Information", expanded=False):
+                    # Format the results for better display
+                    display_results = results.copy()
+                    rating_col = 'IMDB_Rating' if 'IMDB_Rating' in results.columns else 'Rating'
+                    genre_col = 'Genre_y' if 'Genre_y' in results.columns else 'Genre'
+                    
+                    display_results = display_results.rename(columns={
+                        'Series_Title': 'Movie Title',
+                        genre_col: 'Genre',
+                        rating_col: 'IMDB Rating'
+                    })
+                    
+                    # Add ranking
+                    display_results.insert(0, 'Rank', range(1, len(display_results) + 1))
+                    
+                    # Add Movie_ID if available
+                    if 'Movie_ID' in merged_df.columns:
+                        movie_ids = []
+                        for _, row in results.iterrows():
+                            movie_info = merged_df[merged_df['Series_Title'] == row['Series_Title']]
+                            if not movie_info.empty:
+                                movie_ids.append(movie_info.iloc[0]['Movie_ID'])
+                            else:
+                                movie_ids.append('N/A')
+                        display_results.insert(1, 'Movie ID', movie_ids)
+                    
+                    st.dataframe(
+                        display_results,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Rank": st.column_config.NumberColumn("Rank", width="small"),
+                            "Movie ID": st.column_config.NumberColumn("Movie ID", width="small"),
+                            "Movie Title": st.column_config.TextColumn("Movie Title", width="large"),
+                            "Genre": st.column_config.TextColumn("Genre", width="medium"),
+                            "IMDB Rating": st.column_config.NumberColumn("IMDB Rating", format="%.1f⭐")
+                        }
+                    )
                 
                 # Enhanced insights
                 st.subheader("📈 Recommendation Insights")
@@ -606,4 +608,3 @@ if st.sidebar.button("🚀 Generate Recommendations", type="primary"):
 
 if __name__ == "__main__":
     main()
-
