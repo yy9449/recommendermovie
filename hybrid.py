@@ -306,7 +306,7 @@ class FixedLinearHybridRecommender:
 
 
 @st.cache_data
-def smart_hybrid_recommendation(merged_df, target_movie=None, genre=None, top_n=8):
+def smart_hybrid_recommendation(merged_df, target_movie=None, genre=None, top_n=8, show_debug=False):
     """Updated hybrid recommendation function"""
     recommender = FixedLinearHybridRecommender(merged_df)
-    return recommender.recommend(target_movie, genre, top_n)
+    return recommender.recommend(target_movie, genre, top_n, show_debug)
