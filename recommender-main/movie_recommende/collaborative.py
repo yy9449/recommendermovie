@@ -39,8 +39,6 @@ def load_user_ratings():
     synthetic_df = pd.DataFrame({'User_ID': user_ids, 'Movie_ID': movie_ids, 'Rating': ratings})
     return synthetic_df
 
-# ... (the rest of your collaborative.py file remains unchanged)
-
 def get_user_item_matrix(user_ratings_df, merged_df):
     """Create user-item matrix from ratings and movie data."""
     if user_ratings_df is None or user_ratings_df.empty:
